@@ -1,0 +1,10 @@
+{
+  "cron": {
+    "jobs": [
+      {
+        "path": "/api/poll-and-post",
+        "schedule": "0 * * * *"
+      }
+    ]
+  }
+}
