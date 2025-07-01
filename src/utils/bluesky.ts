@@ -7,7 +7,7 @@ async function getAgent() {
     agent = new AtpAgent({ service: 'https://bsky.social' });
     await agent.login({
       identifier: process.env.NEXT_PUBLIC_BSKY_USERNAME!,
-      password: process.env.NEXT_PUBLIC_BSKY_PASSWORD!,
+      password: process.env.NEXT_BSKY_PASSWORD!,
     });
   }
   return agent;
