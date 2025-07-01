@@ -5,6 +5,10 @@ import { postToBluesky } from '@/utils/bluesky';
 import { promises as fs } from 'fs';
 import path from 'path';
 
+export async function GET() {
+  return NextResponse.json({ ok: true, message: 'GET works!' });
+}
+
 const LAST_ID_PATH = process.env.VERCEL
   ? '/tmp/lastTweetId.json'
   : path.join(process.cwd(), 'src/app/api/poll-and-post/lastTweetId.json');
@@ -20,7 +24,7 @@ async function getLastTweetId(): Promise<string | null> {
 }
 
 async function setLastTweetId(id: string): Promise<void> {
-  await fs.writeFile(LAST_ID_PATH, JSON.stringify({ lastTweetId: id }, null, 2), 'utf8');
+  await fs.writeFile(LAST_ID_PATH, JSON.stringify({ lastTweetId: id }, null, 2), { encoding: 'utf8', flag: 'w' });
 }
 
 
