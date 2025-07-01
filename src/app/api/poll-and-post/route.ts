@@ -5,7 +5,9 @@ import { postToBluesky } from '@/utils/bluesky';
 import { promises as fs } from 'fs';
 import path from 'path';
 
-const LAST_ID_PATH = path.join(process.cwd(), 'src/app/api/poll-and-post/lastTweetId.json');
+const LAST_ID_PATH = process.env.VERCEL
+  ? '/tmp/lastTweetId.json'
+  : path.join(process.cwd(), 'src/app/api/poll-and-post/lastTweetId.json');
 
 async function getLastTweetId(): Promise<string | null> {
   try {
