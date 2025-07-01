@@ -5,7 +5,19 @@ import { postToBluesky } from '@/utils/bluesky';
 import { promises as fs } from 'fs';
 import path from 'path';
 
-export async function GET() {
+console.log('[poll-and-post] API route loaded. ENV:', {
+  VERCEL: process.env.VERCEL,
+  NODE_ENV: process.env.NODE_ENV,
+  CWD: process.cwd(),
+  FILE: __filename,
+});
+
+export async function GET(req: NextRequest) {
+  console.log('[poll-and-post] GET handler called', {
+    method: req?.method,
+    url: req?.url,
+    headers: req?.headers,
+  });
   return NextResponse.json({ ok: true, message: 'GET works!' });
 }
 
@@ -29,6 +41,11 @@ async function setLastTweetId(id: string): Promise<void> {
 
 
 export async function POST(req: NextRequest) {
+  console.log('[poll-and-post] POST handler called', {
+    method: req?.method,
+    url: req?.url,
+    headers: req?.headers,
+  });
   let username = process.env.TWITTER_USER_ID || 'twitter';
   try {
     const body = await req.json().catch(() => ({}));
