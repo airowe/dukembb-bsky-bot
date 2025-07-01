@@ -30,22 +30,31 @@ export async function POST(req: NextRequest) {
       username = body.username;
     }
     console.log(`[poll-and-post] Scraping tweets for @${username}`);
-    const tweets = await scrapeLatestTweets(username, 1);
+    // Fetch more tweets to ensure we don't miss any due to pins/replies
+    const tweets = await scrapeLatestTweets(username, 10);
     console.log('[poll-and-post] Scraped tweets:', tweets);
     if (!tweets.length) {
       console.warn(`[poll-and-post] No tweets found for @${username}`);
       return NextResponse.json({ ok: true, message: 'No tweets found.' });
     }
-    const tweet = tweets[0];
     const lastTweetId = await getLastTweetId();
-    if (tweet.id === lastTweetId) {
+    // Only post tweets that are newer than lastTweetId
+    let newTweets = tweets;
+    if (lastTweetId) {
+      const idx = tweets.findIndex(t => t.id === lastTweetId);
+      newTweets = idx === -1 ? tweets : tweets.slice(0, idx);
+    }
+    if (!newTweets.length) {
       console.log(`[poll-and-post] No new tweet to post. Last posted tweet: ${lastTweetId}`);
       return NextResponse.json({ ok: true, message: 'No new tweet to post.' });
     }
-    await postToBluesky(tweet.text, tweet.images);
-    await setLastTweetId(tweet.id);
-    console.log(`[poll-and-post] Posted new tweet ${tweet.id} to Bluesky.`);
-    return NextResponse.json({ ok: true, message: 'Posted new tweet to Bluesky.', tweet });
+    // Post in chronological order (oldest first)
+    for (const tweet of newTweets.reverse()) {
+      await postToBluesky(tweet.text, tweet.images);
+      console.log(`[poll-and-post] Posted tweet ${tweet.id} to Bluesky.`);
+    }
+    await setLastTweetId(newTweets[0].id); // The most recent tweet
+    return NextResponse.json({ ok: true, message: `Posted ${newTweets.length} new tweet(s) to Bluesky.`, tweets: newTweets });
   } catch (err) {
     console.error(`[poll-and-post] Error:`, err);
     return NextResponse.json({ ok: false, error: (err as Error).message }, { status: 500 });

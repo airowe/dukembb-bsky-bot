@@ -33,8 +33,14 @@ export async function scrapeLatestTweets(username: string, count = 1): Promise<T
       const tweets: Tweet[] = [];
       for (let i = 0; i < articles.length && tweets.length < count; i++) {
         const article = articles[i];
-        // Exclude pinned tweets (look for 'Pinned Tweet' label in the article)
-        if (article.innerText && article.innerText.includes('Pinned Tweet')) {
+        // Exclude pinned tweets (look for 'Pinned Tweet' label, aria-label, or similar markers)
+        const isPinned = (
+          article.innerText && article.innerText.toLowerCase().includes('pinned tweet')
+        ) ||
+          (article.getAttribute('aria-label') && article.getAttribute('aria-label')!.toLowerCase().includes('pinned tweet'));
+        if (isPinned) {
+          // Optionally, log for debugging
+          // console.log('Skipping pinned tweet:', article.innerText?.slice(0, 100));
           continue;
         }
         // Exclude replies (look for 'Replying to' label in the article)
