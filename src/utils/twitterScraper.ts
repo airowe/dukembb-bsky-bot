@@ -1,4 +1,10 @@
-import puppeteer from 'puppeteer';
+import puppeteer from 'puppeteer-core';
+
+// IMPORTANT: Set BROWSERLESS_WS_URL in your environment to your Browserless WebSocket endpoint
+const BROWSERLESS_WS_URL = process.env.BROWSERLESS_WS_URL;
+if (!BROWSERLESS_WS_URL) {
+  throw new Error('BROWSERLESS_WS_URL environment variable is required for remote Puppeteer (Browserless)');
+}
 
 export interface Tweet {
   id: string;
@@ -15,9 +21,8 @@ export interface Tweet {
  */
 export async function scrapeLatestTweets(username: string, count = 1): Promise<Tweet[]> {
   const url = `https://x.com/${username}`;
-  const browser = await puppeteer.launch({
-    args: ['--no-sandbox', '--disable-setuid-sandbox'],
-    headless: true,
+  const browser = await puppeteer.connect({
+    browserWSEndpoint: BROWSERLESS_WS_URL,
   });
   try {
     const page = await browser.newPage();
