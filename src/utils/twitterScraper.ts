@@ -26,12 +26,25 @@ export async function scrapeLatestTweets(username: string, count = 1): Promise<T
   });
   try {
     const page = await browser.newPage();
+    // Set a more realistic user-agent
     await page.setUserAgent(
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36'
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
     );
-    await page.goto(url, { waitUntil: 'networkidle2', timeout: 45000 });
-    // Wait for tweet articles to render
-    await page.waitForSelector('article', { timeout: 20000 });
+    // Set Accept-Language header to English
+    await page.setExtraHTTPHeaders({
+      'Accept-Language': 'en-US,en;q=0.9',
+    });
+    // Navigate to the page with a longer timeout
+    await page.goto(url, { waitUntil: 'networkidle2', timeout: 60000 });
+    try {
+      // Wait for tweet articles to render with a longer timeout
+      await page.waitForSelector('article', { timeout: 25000 });
+    } catch (err) {
+      // Dump the HTML for debugging if selector fails
+      const html = await page.content();
+      console.error('[twitterScraper] Failed to find <article> selector. Dumping HTML:', html.slice(0, 2000));
+      throw err;
+    }
     // Extract tweets
     const tweets: Tweet[] = await page.evaluate((count) => {
       const articles = Array.from(document.querySelectorAll('article'));
