@@ -40,9 +40,13 @@ export async function scrapeLatestTweets(username: string, count = 1): Promise<T
       // Wait for tweet articles to render with a longer timeout
       await page.waitForSelector('article', { timeout: 25000 });
     } catch (err) {
-      // Dump the HTML for debugging if selector fails
+      // Dump the HTML, page title, and body text for debugging if selector fails
       const html = await page.content();
-      console.error('[twitterScraper] Failed to find <article> selector. Dumping HTML:', html.slice(0, 2000));
+      const title = await page.title();
+      const bodyText = await page.evaluate(() => document.body.innerText || '');
+      console.error('[twitterScraper] Failed to find <article> selector. Title:', title);
+      console.error('[twitterScraper] Body text:', bodyText.slice(0, 2000));
+      console.error('[twitterScraper] Dumping HTML:', html.slice(0, 2000));
       throw err;
     }
     // Extract tweets
