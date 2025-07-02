@@ -23,6 +23,14 @@ export async function postToBluesky(text: string, images?: string[]) {
     const uploaded: AppBskyEmbedImages.Image[] = [];
     for (const url of images.slice(0, 4)) { // Bluesky supports up to 4 images
       const response = await axios.get(url, { responseType: 'arraybuffer' });
+      // Check file size (response.data is a Buffer or ArrayBuffer)
+      const size = response.data.byteLength !== undefined
+        ? response.data.byteLength
+        : response.data.length;
+      if (size > 1_000_000) { // 976.56KB = 1,000,000 bytes (approx)
+        console.warn(`Skipping image at ${url}: size ${size} bytes exceeds Bluesky limit (976.56KB)`);
+        continue;
+      }
       const mimeType = response.headers['content-type'] || 'image/jpeg';
       const imgRes = await agent.uploadBlob(response.data, { encoding: mimeType });
       console.log('uploadBlob result:', JSON.stringify(imgRes, null, 2));
