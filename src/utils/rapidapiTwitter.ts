@@ -72,6 +72,7 @@ export async function fetchLatestTweetsFromListRapidAPI(listId: string, count = 
       'X-RapidAPI-Host': RAPIDAPI_HOST,
     },
   });
+  console.log('[fetchLatestTweetsFromListRapidAPI] API response:', JSON.stringify(response.data, null, 2));
   // Defensive check: ensure response.data.timeline is defined and is an array
   if (!response.data || !Array.isArray(response.data.timeline)) {
     console.error('[fetchLatestTweetsFromListRapidAPI] Unexpected API response:', JSON.stringify(response.data, null, 2));
@@ -122,7 +123,7 @@ export function startRapidApiPoller({
   let lastTweetId: string | null = null;
   async function poll() {
     try {
-      const tweets = await fetchLatestTweetsRapidAPI(username, 3);
+      const tweets = await fetchLatestTweetsRapidAPI(username, 10);
       if (!tweets.length) return;
       // Tweets are returned newest first
       const newTweets = lastTweetId
