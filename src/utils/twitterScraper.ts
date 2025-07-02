@@ -1,3 +1,5 @@
+// DEPRECATED: This file is no longer used. Tweet fetching is now done via RapidAPI in src/utils/rapidapiTwitter.ts
+
 import puppeteer from 'puppeteer-core';
 
 // IMPORTANT: Set BROWSERLESS_WS_URL in your environment to your Browserless WebSocket endpoint

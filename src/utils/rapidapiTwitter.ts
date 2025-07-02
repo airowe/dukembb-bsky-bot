@@ -36,6 +36,37 @@ export async function fetchLatestTweetsRapidAPI(username: string, count = 1): Pr
 }
 
 /**
+ * Fetch latest tweets from a Twitter List via RapidAPI List Timeline endpoint
+ * @param listId Twitter List ID
+ * @param count Number of tweets to fetch
+ */
+export async function fetchLatestTweetsFromListRapidAPI(listId: string, count = 10): Promise<RapidApiTweet[]> {
+  const url = `https://twitter-api45.p.rapidapi.com/list/timeline/`;
+  const response = await axios.get(url, {
+    params: { listId, limit: count },
+    headers: {
+      'X-RapidAPI-Key': RAPIDAPI_KEY!,
+      'X-RapidAPI-Host': RAPIDAPI_HOST,
+    },
+  });
+  // Adapt the response to match your RapidApiTweet interface
+  return response.data.result.map((tweet: {
+    id_str: string;
+    full_text: string;
+    created_at: string;
+    entities?: { media?: { media_url_https: string }[] };
+    user?: { screen_name: string };
+  }) => ({
+    id: tweet.id_str,
+    text: tweet.full_text,
+    url: tweet.user && tweet.user.screen_name ? `https://x.com/${tweet.user.screen_name}/status/${tweet.id_str}` : '',
+    timestamp: tweet.created_at,
+    images: tweet.entities?.media?.map((m) => m.media_url_https) || [],
+  }));
+}
+
+
+/**
  * Self-invoking polling function for serverless environments (e.g., Vercel, Netlify, etc.)
  * This will keep polling as long as the process is alive, without needing a cron job.
  */

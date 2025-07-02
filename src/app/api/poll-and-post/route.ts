@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { scrapeLatestTweets } from '@/utils/twitterScraper';
+import { fetchLatestTweetsFromListRapidAPI } from '@/utils/rapidapiTwitter';
 import { postToBluesky } from '@/utils/bluesky';
 
 import { promises as fs } from 'fs';
@@ -46,25 +46,26 @@ export async function POST(req: NextRequest) {
     url: req?.url,
     headers: req?.headers,
   });
-  let username = process.env.TWITTER_USER_ID || 'twitter';
+  const listId = process.env.LIST_ID;
+  if (!listId) {
+    console.error('[poll-and-post] LIST_ID environment variable is not set.');
+    return NextResponse.json({ ok: false, error: 'LIST_ID environment variable is required.' }, { status: 500 });
+  }
   try {
-    const body = await req.json().catch(() => ({}));
-    if (body.username) {
-      username = body.username;
-    }
-    console.log(`[poll-and-post] Scraping tweets for @${username}`);
-    // Fetch more tweets to ensure we don't miss any due to pins/replies
-    const tweets = await scrapeLatestTweets(username, 10);
-    console.log('[poll-and-post] Scraped tweets:', tweets);
+    console.log(`[poll-and-post] Fetching tweets from Twitter List ID: ${listId}`);
+    // Fetch tweets from Twitter List Timeline via RapidAPI
+    // Requires RAPIDAPI_KEY and LIST_ID in env
+    const tweets = await fetchLatestTweetsFromListRapidAPI(listId, 10);
+    console.log('[poll-and-post] Fetched tweets from list (RapidAPI):', tweets);
     if (!tweets.length) {
-      console.warn(`[poll-and-post] No tweets found for @${username}`);
+      console.warn(`[poll-and-post] No tweets found for list ID ${listId} (RapidAPI)`);
       return NextResponse.json({ ok: true, message: 'No tweets found.' });
     }
     const lastTweetId = await getLastTweetId();
     // Only post tweets that are newer than lastTweetId
     let newTweets = tweets;
     if (lastTweetId) {
-      const idx = tweets.findIndex(t => t.id === lastTweetId);
+      const idx = tweets.findIndex((t: { id: string }) => t.id === lastTweetId);
       newTweets = idx === -1 ? tweets : tweets.slice(0, idx);
     }
     if (!newTweets.length) {
