@@ -32,6 +32,10 @@ export async function postToBluesky(text: string, images?: string[]) {
         continue;
       }
       const mimeType = response.headers['content-type'] || 'image/jpeg';
+      if (!mimeType.startsWith('image/')) {
+        console.warn(`Skipping file at ${url}: type ${mimeType} is not an image.`);
+        continue;
+      }
       const imgRes = await agent.uploadBlob(response.data, { encoding: mimeType });
       console.log('uploadBlob result:', JSON.stringify(imgRes, null, 2));
       uploaded.push({
