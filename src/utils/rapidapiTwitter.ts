@@ -1,7 +1,7 @@
 import axios from 'axios';
 
 const RAPIDAPI_KEY = process.env.RAPIDAPI_KEY;
-const RAPIDAPI_HOST = 'twitter241.p.rapidapi.com';
+const RAPIDAPI_HOST = 'twitter-api45.p.rapidapi.com';
 
 export interface RapidApiTweet {
   id: string;
@@ -12,7 +12,7 @@ export interface RapidApiTweet {
 }
 
 export async function fetchLatestTweetsRapidAPI(username: string, count = 1): Promise<RapidApiTweet[]> {
-  const url = `https://twitter241.p.rapidapi.com/user/tweets/${username}`;
+  const url = `https://${RAPIDAPI_HOST}/user/tweets/${username}`;
   const response = await axios.get(url, {
     params: { limit: count },
     headers: {
@@ -41,9 +41,9 @@ export async function fetchLatestTweetsRapidAPI(username: string, count = 1): Pr
  * @param count Number of tweets to fetch
  */
 export async function fetchLatestTweetsFromListRapidAPI(listId: string, count = 10): Promise<RapidApiTweet[]> {
-  const url = `https://twitter-api45.p.rapidapi.com/list/timeline/`;
+  const url = `https://${RAPIDAPI_HOST}/listtimeline.php`;
   const response = await axios.get(url, {
-    params: { listId, limit: count },
+    params: { list_id:listId, limit: count },
     headers: {
       'X-RapidAPI-Key': RAPIDAPI_KEY!,
       'X-RapidAPI-Host': RAPIDAPI_HOST,
