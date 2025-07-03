@@ -129,7 +129,7 @@ export async function fetchLatestTweetsFromListRapidAPI(listId: string, count = 
 export function startRapidApiPoller({
   username,
   onNewTweet,
-  intervalMs = 60000,
+  intervalMs = 900000,
 }: {
   username: string;
   onNewTweet: (tweet: RapidApiTweet) => Promise<void>;
@@ -138,7 +138,7 @@ export function startRapidApiPoller({
   let lastTweetId: string | null = null;
   async function poll() {
     try {
-      const tweets = await fetchLatestTweetsRapidAPI(username, 10);
+      const tweets = await fetchLatestTweetsRapidAPI(username, 3);
       if (!tweets.length) return;
       // Tweets are returned newest first
       const newTweets = lastTweetId
