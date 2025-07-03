@@ -25,14 +25,29 @@ export async function fetchLatestTweetsRapidAPI(username: string, count = 1): Pr
     id_str: string;
     full_text: string;
     created_at: string;
-    entities?: { media?: { media_url_https: string }[] };
-  }) => ({
-    id: tweet.id_str,
-    text: tweet.full_text,
-    url: `https://x.com/${username}/status/${tweet.id_str}`,
-    timestamp: tweet.created_at,
-    images: tweet.entities?.media?.map((m) => m.media_url_https) || [],
-  }));
+    entities?: {
+      media?: { media_url_https: string }[];
+      urls?: { url: string; expanded_url: string }[];
+    };
+  }) => {
+    let text = tweet.full_text;
+    if (tweet.entities?.urls && Array.isArray(tweet.entities.urls)) {
+      for (const u of tweet.entities.urls) {
+        if (u.url && u.expanded_url) {
+          // Replace all instances of the t.co link with the expanded URL
+          const regex = new RegExp(u.url.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g');
+          text = text.replace(regex, u.expanded_url);
+        }
+      }
+    }
+    return {
+      id: tweet.id_str,
+      text,
+      url: `https://x.com/${username}/status/${tweet.id_str}`,
+      timestamp: tweet.created_at,
+      images: tweet.entities?.media?.map((m) => m.media_url_https) || [],
+    };
+  });
 }
 
 /**
@@ -63,7 +78,7 @@ interface RapidApiRawTweet {
   media?: Media;
 }
 
-export async function fetchLatestTweetsFromListRapidAPI(listId: string, count = 10): Promise<RapidApiTweet[]> {
+export async function fetchLatestTweetsFromListRapidAPI(listId: string, count = 3): Promise<RapidApiTweet[]> {
   const url = `https://${RAPIDAPI_HOST}/listtimeline.php`;
   const response = await axios.get(url, {
     params: { list_id:listId, limit: count },

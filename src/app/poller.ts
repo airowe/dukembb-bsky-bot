@@ -8,8 +8,10 @@ const username = process.env.TWITTER_USER_ID || 'twitter'; // replace 'twitter' 
 import type { RapidApiTweet } from '@/utils/rapidapiTwitter';
 
 async function onNewTweet(tweet: RapidApiTweet) {
-  // Post the tweet text and images to Bluesky
-  await postToBluesky(tweet.text, tweet.images);
+  // Separate images and videos
+  const images = (tweet.images || []).filter(url => !url.endsWith('.mp4'));
+  const videos = (tweet.images || []).filter(url => url.endsWith('.mp4'));
+  await postToBluesky(tweet.text, images, videos);
 }
 
 // Start polling when this script/module is run

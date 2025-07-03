@@ -15,10 +15,32 @@ async function getAgent() {
 
 import axios from 'axios';
 
-export async function postToBluesky(text: string, images?: string[]) {
+// Accepts images and videos, prefers video if both present
+export async function postToBluesky(text: string, images?: string[], videos?: string[]) {
   const agent = await getAgent();
-  let embed: $Typed<AppBskyEmbedImages.Main> | undefined;
-  if (images && images.length > 0) {
+  let embed: $Typed<AppBskyEmbedImages.Main> | {
+    $type: 'app.bsky.embed.external';
+    external: {
+      uri: string;
+      title: string;
+      description: string;
+      thumb?: unknown;
+    };
+  } | undefined = undefined;
+  // Prefer video if present
+  if (videos && videos.length > 0) {
+    const videoUrl = videos[0];
+    embed = {
+      $type: 'app.bsky.embed.external',
+      external: {
+        uri: videoUrl,
+        title: 'Video',
+        description: '',
+        thumb: undefined // Optionally, you can add a thumbnail if available
+      },
+    };
+    console.log('Posting with video external embed:', videoUrl);
+  } else if (images && images.length > 0) {
     // Download and upload each image to Bluesky
     const uploaded: AppBskyEmbedImages.Image[] = [];
     for (const url of images.slice(0, 4)) { // Bluesky supports up to 4 images
@@ -52,6 +74,10 @@ export async function postToBluesky(text: string, images?: string[]) {
     // embed is now correctly typed as AppBskyEmbedImages.Main
   }
   await agent.post({ text, embed });
-  console.log('Posted to Bluesky:', text, images?.length ? `with ${images.length} image(s)` : '');
+  if (videos && videos.length > 0) {
+    console.log('Posted to Bluesky:', text, `with video: ${videos[0]}`);
+  } else {
+    console.log('Posted to Bluesky:', text, images?.length ? `with ${images.length} image(s)` : '');
+  }
 }
 
