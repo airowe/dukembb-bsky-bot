@@ -9,6 +9,7 @@ export interface RapidApiTweet {
   url: string;
   timestamp: string;
   images: string[];
+  altText: string[];
 }
 
 export async function fetchLatestTweetsRapidAPI(username: string, count = 1): Promise<RapidApiTweet[]> {
@@ -93,32 +94,52 @@ export async function fetchLatestTweetsFromListRapidAPI(listId: string, count = 
     console.error('[fetchLatestTweetsFromListRapidAPI] Unexpected API response:', JSON.stringify(response.data, null, 2));
     return [];
   }
-  return response.data.timeline.map((tweet: RapidApiRawTweet) => {
-    // Collect all image and video URLs from media if present
-    const images = Array.isArray(tweet.media?.photo)
-      ? tweet.media.photo.map((m: PhotoMedia) => m.media_url_https)
-      : [];
-    const videos = Array.isArray(tweet.media?.video)
-      ? tweet.media.video.flatMap((v: VideoMedia) => {
-          if (v.variants && Array.isArray(v.variants)) {
-            // Prefer the highest bitrate mp4, else first variant
-            const mp4s = v.variants.filter((va: VideoVariant) => va.content_type === 'video/mp4');
-            if (mp4s.length) {
-              return [mp4s.sort((a: VideoVariant, b: VideoVariant) => (b.bitrate || 0) - (a.bitrate || 0))[0].url];
-            }
-            return [v.variants[0]?.url].filter(Boolean);
+  return response.data.timeline
+    .filter((tweet: any) => {
+      // Exclude retweets (RT prefix or retweeted_status field)
+      if (tweet.text && tweet.text.startsWith('RT ')) return false;
+      if ('retweeted_status' in tweet) return false;
+      // Exclude replies (text starts with '@' or in_reply_to_status_id present)
+      if (tweet.text && tweet.text.trim().startsWith('@')) return false;
+      if ('in_reply_to_status_id' in tweet && tweet.in_reply_to_status_id) return false;
+      return true;
+    })
+    .map((tweet: any) => {
+      // Expand t.co links if possible
+      let text = tweet.text;
+      if (tweet.entities && Array.isArray(tweet.entities.urls)) {
+        for (const u of tweet.entities.urls) {
+          if (u.url && u.expanded_url) {
+            const regex = new RegExp(u.url.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g');
+            text = text.replace(regex, u.expanded_url);
           }
-          return [];
-        })
-      : [];
-    return {
-      id: tweet.tweet_id,
-      text: tweet.text,
-      url: tweet.screen_name ? `https://x.com/${tweet.screen_name}/status/${tweet.tweet_id}` : '',
-      timestamp: tweet.created_at,
-      images: [...images, ...videos],
-    };
-  });
+        }
+      }
+      const images = Array.isArray(tweet.media?.photo)
+        ? tweet.media.photo.map((m: PhotoMedia) => m.media_url_https)
+        : [];
+      const videos = Array.isArray(tweet.media?.video)
+        ? tweet.media.video.flatMap((v: VideoMedia) => {
+            if (v.variants && Array.isArray(v.variants)) {
+              const mp4s = v.variants.filter((va: VideoVariant) => va.content_type === 'video/mp4');
+              if (mp4s.length) {
+                return [mp4s.sort((a: VideoVariant, b: VideoVariant) => (b.bitrate || 0) - (a.bitrate || 0))[0].url];
+              }
+              return [v.variants[0]?.url].filter(Boolean);
+            }
+            return [];
+          })
+        : [];
+      const altText = images.map(() => tweet.screen_name ? `Image from tweet by @${tweet.screen_name}` : '');
+      return {
+        id: tweet.tweet_id,
+        text,
+        url: tweet.screen_name ? `https://x.com/${tweet.screen_name}/status/${tweet.tweet_id}` : '',
+        timestamp: tweet.created_at,
+        images: [...images, ...videos],
+        altText,
+      };
+    });
 }
 
 

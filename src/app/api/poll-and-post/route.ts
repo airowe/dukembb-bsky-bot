@@ -102,12 +102,14 @@ export async function POST(req: NextRequest) {
       );
       return NextResponse.json({ ok: true, message: "No new tweet to post." });
     }
-    // Post in chronological order (oldest first)
-    for (const tweet of newTweets.reverse()) {
-      await postToBluesky(tweet.text, tweet.images);
+    // Post in chronological order (oldest first), but limit to 3 tweets max per poll
+    const toPost = newTweets.reverse().slice(0, 3);
+    for (const tweet of toPost) {
+      // Pass altText for images to Bluesky
+      await postToBluesky(tweet.text, tweet.images, undefined, tweet.altText);
       console.log(`[poll-and-post] Posted tweet ${tweet.id} to Bluesky.`);
     }
-    await setLastTweetId(newTweets[0].id); // The most recent tweet
+    await setLastTweetId(toPost[0].id); // The most recent tweet posted
     return NextResponse.json({
       ok: true,
       message: `Posted ${newTweets.length} new tweet(s) to Bluesky.`,
