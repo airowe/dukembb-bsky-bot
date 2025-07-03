@@ -44,6 +44,24 @@ async function setLastTweetId(id: string): Promise<void> {
 }
 
 export async function POST(req: NextRequest) {
+  // --- Simple Auth: Require Bearer token in Authorization header ---
+  const authHeader = req.headers.get('authorization');
+  const expectedToken = process.env.POLL_AND_POST_SECRET;
+  if (!expectedToken || !authHeader || !authHeader.startsWith('Bearer ')) {
+    return NextResponse.json(
+      { ok: false, error: 'Unauthorized: Missing or invalid auth header.' },
+      { status: 401 }
+    );
+  }
+  const token = authHeader.substring('Bearer '.length).trim();
+  if (token !== expectedToken) {
+    return NextResponse.json(
+      { ok: false, error: 'Unauthorized: Invalid token.' },
+      { status: 401 }
+    );
+  }
+  // --- End Auth ---
+
   console.log("[poll-and-post] POST handler called", {
     method: req?.method,
     url: req?.url,

@@ -122,38 +122,4 @@ export async function fetchLatestTweetsFromListRapidAPI(listId: string, count = 
 }
 
 
-/**
- * Self-invoking polling function for serverless environments (e.g., Vercel, Netlify, etc.)
- * This will keep polling as long as the process is alive, without needing a cron job.
- */
-export function startRapidApiPoller({
-  username,
-  onNewTweet,
-  intervalMs = 900000,
-}: {
-  username: string;
-  onNewTweet: (tweet: RapidApiTweet) => Promise<void>;
-  intervalMs?: number;
-}): void {
-  let lastTweetId: string | null = null;
-  async function poll() {
-    try {
-      const tweets = await fetchLatestTweetsRapidAPI(username, 3);
-      if (!tweets.length) return;
-      // Tweets are returned newest first
-      const newTweets = lastTweetId
-        ? tweets.filter((t: RapidApiTweet) => t.id !== lastTweetId)
-        : [tweets[0]];
-      if (newTweets.length) {
-        for (const tweet of newTweets.reverse()) {
-          await onNewTweet(tweet);
-        }
-        lastTweetId = tweets[0].id;
-      }
-    } catch (err) {
-      console.error('RapidAPI polling error:', err);
-    }
-    setTimeout(poll, intervalMs);
-  }
-  poll(); // Run immediately
-}
+
