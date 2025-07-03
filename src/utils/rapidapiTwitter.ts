@@ -71,13 +71,7 @@ interface Media {
   photo?: PhotoMedia[];
   video?: VideoMedia[];
 }
-interface RapidApiRawTweet {
-  tweet_id: string;
-  text: string;
-  screen_name?: string;
-  created_at: string;
-  media?: Media;
-}
+
 
 export async function fetchLatestTweetsFromListRapidAPI(listId: string, count = 3): Promise<RapidApiTweet[]> {
   const url = `https://${RAPIDAPI_HOST}/listtimeline.php`;
@@ -94,8 +88,21 @@ export async function fetchLatestTweetsFromListRapidAPI(listId: string, count = 
     console.error('[fetchLatestTweetsFromListRapidAPI] Unexpected API response:', JSON.stringify(response.data, null, 2));
     return [];
   }
-  return response.data.timeline
-    .filter((tweet: any) => {
+  interface ListApiTweet {
+    tweet_id: string;
+    text: string;
+    screen_name?: string;
+    created_at: string;
+    media?: Media;
+    entities?: {
+      urls?: { url: string; expanded_url: string }[];
+    };
+    retweeted_status?: unknown;
+    in_reply_to_status_id?: string | null;
+  }
+
+  return (response.data.timeline as ListApiTweet[])
+    .filter((tweet) => {
       // Exclude retweets (RT prefix or retweeted_status field)
       if (tweet.text && tweet.text.startsWith('RT ')) return false;
       if ('retweeted_status' in tweet) return false;
@@ -104,7 +111,7 @@ export async function fetchLatestTweetsFromListRapidAPI(listId: string, count = 
       if ('in_reply_to_status_id' in tweet && tweet.in_reply_to_status_id) return false;
       return true;
     })
-    .map((tweet: any) => {
+    .map((tweet) => {
       // Expand t.co links if possible
       let text = tweet.text;
       if (tweet.entities && Array.isArray(tweet.entities.urls)) {
@@ -141,6 +148,3 @@ export async function fetchLatestTweetsFromListRapidAPI(listId: string, count = 
       };
     });
 }
-
-
-
