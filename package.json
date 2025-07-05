@@ -12,6 +12,8 @@
     "@atproto/api": "^0.15.19",
     "axios": "^1.10.0",
     "cheerio": "^1.1.0",
+    "he": "^1.2.0",
+    "html-entities": "^2.6.0",
     "next": "15.3.4",
     "puppeteer": "^24.11.1",
     "react": "^19.0.0",
