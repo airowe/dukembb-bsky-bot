@@ -73,6 +73,8 @@ interface Media {
 }
 
 
+import { htmlDecode } from './htmlDecode';
+
 export async function fetchLatestTweetsFromListRapidAPI(listId: string, count = 3): Promise<RapidApiTweet[]> {
   const url = `https://${RAPIDAPI_HOST}/listtimeline.php`;
   const response = await axios.get(url, {
@@ -107,13 +109,12 @@ export async function fetchLatestTweetsFromListRapidAPI(listId: string, count = 
       if (tweet.text && tweet.text.startsWith('RT ')) return false;
       if ('retweeted_status' in tweet) return false;
       // Exclude replies (text starts with '@' or in_reply_to_status_id present)
-      if (tweet.text && tweet.text.trim().startsWith('@')) return false;
       if ('in_reply_to_status_id' in tweet && tweet.in_reply_to_status_id) return false;
       return true;
     })
     .map((tweet) => {
-      // Expand t.co links if possible
-      let text = tweet.text;
+      // Decode HTML entities before expanding t.co links
+      let text = htmlDecode(tweet.text);
       if (tweet.entities && Array.isArray(tweet.entities.urls)) {
         for (const u of tweet.entities.urls) {
           if (u.url && u.expanded_url) {

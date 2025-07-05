@@ -15,6 +15,7 @@ async function getAgent() {
 
 import axios from 'axios';
 
+import { escapeBlueskyText } from './escapeBlueskyText';
 // Accepts images and videos, prefers video if both present
 export async function postToBluesky(text: string, images?: string[], videos?: string[], altText?: string[]) {
   const agent = await getAgent();
@@ -73,7 +74,9 @@ export async function postToBluesky(text: string, images?: string[], videos?: st
     console.dir(embed, { depth: null });
     // embed is now correctly typed as AppBskyEmbedImages.Main
   }
-  await agent.post({ text, embed });
+  // Escape and normalize text before posting
+  const safeText = escapeBlueskyText(text);
+  await agent.post({ text: safeText, embed });
   if (videos && videos.length > 0) {
     console.log('Posted to Bluesky:', text, `with video: ${videos[0]}`);
   } else {

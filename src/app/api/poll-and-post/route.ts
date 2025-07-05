@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { fetchLatestTweetsFromListRapidAPI } from "@/utils/rapidapiTwitter";
-import { postToBluesky } from "@/utils/bluesky";
+import { postToBluesky } from "@/utils/bluesky"; // (postToBluesky now escapes text)
 
 import { promises as fs } from "fs";
 import path from "path";
@@ -90,11 +90,17 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true, message: "No tweets found." });
     }
     const lastTweetId = await getLastTweetId();
-    // Only post tweets that are newer than lastTweetId
-    let newTweets = tweets;
+    // Ensure tweets are in chronological order (oldest first)
+    const tweetsChrono = [...tweets].reverse();
+    let newTweets: typeof tweetsChrono = tweetsChrono;
     if (lastTweetId) {
-      const idx = tweets.findIndex((t: { id: string }) => t.id === lastTweetId);
-      newTweets = idx === -1 ? tweets : tweets.slice(0, idx);
+      const idx = tweetsChrono.findIndex((t: { id: string }) => t.id === lastTweetId);
+      if (idx === -1) {
+        // If lastTweetId is not present, skip posting to avoid duplicates
+        console.warn(`[poll-and-post] Last posted tweet ID (${lastTweetId}) not found in latest fetched tweets. Skipping posting to avoid duplicates.`);
+        return NextResponse.json({ ok: true, message: "Last posted tweet not found in latest fetch. Skipping to avoid duplicates." });
+      }
+      newTweets = tweetsChrono.slice(idx + 1); // Only tweets after the last posted one
     }
     if (!newTweets.length) {
       console.log(
@@ -102,8 +108,8 @@ export async function POST(req: NextRequest) {
       );
       return NextResponse.json({ ok: true, message: "No new tweet to post." });
     }
-    // Post in chronological order (oldest first), but limit to 3 tweets max per poll
-    const toPost = newTweets.reverse().slice(0, 3);
+    // Post at most 3 tweets per poll, oldest first
+    const toPost = newTweets.slice(0, 3);
     for (const tweet of toPost) {
       // Pass altText for images to Bluesky
       await postToBluesky(tweet.text, tweet.images, undefined, tweet.altText);
