@@ -113,16 +113,19 @@ export async function fetchLatestTweetsFromListRapidAPI(listId: string, count = 
       return true;
     })
     .map((tweet) => {
-      // Decode HTML entities before expanding t.co links
+      // Decode HTML entities first
       let text = htmlDecode(tweet.text);
+      // Build t.co -> expanded_url map
+      const urlMap: Record<string, string> = {};
       if (tweet.entities && Array.isArray(tweet.entities.urls)) {
         for (const u of tweet.entities.urls) {
           if (u.url && u.expanded_url) {
-            const regex = new RegExp(u.url.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g');
-            text = text.replace(regex, u.expanded_url);
+            urlMap[u.url] = u.expanded_url;
           }
         }
       }
+      // Replace all t.co links in text with expanded_url if available
+      text = text.replace(/https?:\/\/t\.co\/[a-zA-Z0-9]+/g, (match) => urlMap[match] || match);
       const images = Array.isArray(tweet.media?.photo)
         ? tweet.media.photo.map((m: PhotoMedia) => m.media_url_https)
         : [];
