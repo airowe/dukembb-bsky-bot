@@ -1,4 +1,4 @@
-import { AtpAgent, AppBskyEmbedImages, $Typed } from '@atproto/api';
+import { AtpAgent, AppBskyEmbedImages, $Typed, RichText } from '@atproto/api';
 
 let agent: AtpAgent | null = null;
 
@@ -76,7 +76,12 @@ export async function postToBluesky(text: string, images?: string[], videos?: st
   }
   // Escape and normalize text before posting
   const safeText = escapeBlueskyText(text);
-  await agent.post({ text: safeText, embed });
+
+  // --- Add link facets for clickable links ---
+  const richText = new RichText({ text: safeText });
+  await richText.detectFacets(agent); // This will auto-detect URLs and add link facets
+
+  await agent.post({ text: safeText, embed, facets: richText.facets });
   if (videos && videos.length > 0) {
     console.log('Posted to Bluesky:', text, `with video: ${videos[0]}`);
   } else {
