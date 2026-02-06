@@ -55,14 +55,22 @@ const MAX_IMAGE_BYTES = 1_000_000;
 
 export default {
   async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext) {
-    ctx.waitUntil(run(env));
+    ctx.waitUntil(run(env, false));
   },
   async fetch(request: Request, env: Env, ctx: ExecutionContext) {
     const url = new URL(request.url);
-    if (url.pathname === '/run') {
-      const result = await run(env);
+    if (url.pathname === '/run' || url.pathname === '/dry-run') {
+      const dryRun = url.pathname === '/dry-run' || url.searchParams.get('dry') === '1';
+      const result = await run(env, dryRun);
       return new Response(JSON.stringify(result), {
         status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }
+    if (url.pathname === '/dry-run-last') {
+      const last = await env.DUKE_KV.get('dry-run-last');
+      return new Response(last || '', {
+        status: last ? 200 : 404,
         headers: { 'content-type': 'application/json' },
       });
     }
@@ -70,7 +78,7 @@ export default {
   },
 };
 
-async function run(env: Env) {
+async function run(env: Env, dryRun: boolean) {
   const now = Date.now();
   const baselineMinutes = getInt(env.BASELINE_MINUTES, DEFAULT_BASELINE_MINUTES);
   const gameMinutes = getInt(env.GAME_MINUTES, DEFAULT_GAME_MINUTES);
@@ -88,21 +96,21 @@ async function run(env: Env) {
   const intervalMinutes = inGameWindow ? gameMinutes : baselineMinutes;
 
   const state = await getPollState(env);
-  const shouldPoll = mode !== state.lastMode || now - (state.lastPollAt ?? 0) >= intervalMinutes * 60_000;
+  const shouldPoll = dryRun || mode !== state.lastMode || now - (state.lastPollAt ?? 0) >= intervalMinutes * 60_000;
 
   if (!shouldPoll) {
     return { ok: true, skipped: true, mode, reason: 'interval-not-reached' };
   }
 
-  const ok = await pollAndPost(env);
+  const ok = await pollAndPost(env, { dryRun, now, mode });
   if (ok) {
     await setPollState(env, { lastPollAt: now, lastMode: mode });
   }
 
-  return { ok, skipped: !ok, mode };
+  return { ok, skipped: !ok, mode, dryRun };
 }
 
-async function pollAndPost(env: Env): Promise<boolean> {
+async function pollAndPost(env: Env, opts: { dryRun: boolean; now: number; mode: PollState['lastMode'] }): Promise<boolean> {
   if (!env.RAPIDAPI_KEY || !env.TWITTER_USERNAME || !env.BSKY_USERNAME || !env.BSKY_PASSWORD) {
     console.log('[worker] Missing required env vars');
     return false;
@@ -110,6 +118,12 @@ async function pollAndPost(env: Env): Promise<boolean> {
 
   const tweets = await fetchLatestTweetsRapidAPI(env.TWITTER_USERNAME, env.RAPIDAPI_KEY, 10);
   if (!tweets.length) {
+    if (opts.dryRun) {
+      await env.DUKE_KV.put(
+        'dry-run-last',
+        JSON.stringify({ at: opts.now, mode: opts.mode, reason: 'no-tweets', tweets: [] })
+      );
+    }
     return true;
   }
 
@@ -127,10 +141,33 @@ async function pollAndPost(env: Env): Promise<boolean> {
   }
 
   if (!newTweets.length) {
+    if (opts.dryRun) {
+      await env.DUKE_KV.put(
+        'dry-run-last',
+        JSON.stringify({ at: opts.now, mode: opts.mode, reason: 'no-new-tweets', tweets: [] })
+      );
+    }
     return true;
   }
 
   const toPost = newTweets.slice(0, MAX_POSTS_PER_RUN);
+  if (opts.dryRun) {
+    await env.DUKE_KV.put(
+      'dry-run-last',
+      JSON.stringify({
+        at: opts.now,
+        mode: opts.mode,
+        tweets: toPost.map((t) => ({
+          id: t.id,
+          text: t.text,
+          url: t.url,
+          images: t.images,
+          videos: t.videos,
+        })),
+      })
+    );
+    return true;
+  }
   for (const tweet of toPost) {
     const ok = await postToBluesky(env, tweet.text, tweet.images, tweet.videos, tweet.altText);
     if (!ok) return false;
