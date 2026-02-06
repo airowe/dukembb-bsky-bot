@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { fetchLatestTweetsFromListRapidAPI } from "@/utils/rapidapiTwitter";
+import { fetchLatestTweetsFromListRapidAPI, fetchLatestTweetsRapidAPI } from "@/utils/rapidapiTwitter";
 import { postToBluesky } from "@/utils/bluesky"; // (postToBluesky now escapes text)
 
 import { promises as fs } from "fs";
@@ -67,25 +67,36 @@ export async function POST(req: NextRequest) {
     url: req?.url,
     headers: req?.headers,
   });
+  const twitterUsername = process.env.TWITTER_USERNAME || process.env.TWITTER_USER_ID;
   const listId = process.env.LIST_ID;
-  if (!listId) {
-    console.error("[poll-and-post] LIST_ID environment variable is not set.");
+  if (!twitterUsername && !listId) {
+    console.error("[poll-and-post] TWITTER_USERNAME/TWITTER_USER_ID or LIST_ID environment variable is not set.");
     return NextResponse.json(
-      { ok: false, error: "LIST_ID environment variable is required." },
+      { ok: false, error: "TWITTER_USERNAME (or TWITTER_USER_ID) or LIST_ID is required." },
       { status: 500 }
     );
   }
   try {
-    console.log(
-      `[poll-and-post] Fetching tweets from Twitter List ID: ${listId}`
-    );
-    // Fetch tweets from Twitter List Timeline via RapidAPI
-    // Requires RAPIDAPI_KEY and LIST_ID in env
-    const tweets = await fetchLatestTweetsFromListRapidAPI(listId, 10);
-    console.log("[poll-and-post] Fetched tweets from list (RapidAPI):", tweets);
+    let tweets;
+    if (twitterUsername) {
+      console.log(
+        `[poll-and-post] Fetching tweets from Twitter user: ${twitterUsername}`
+      );
+      // Fetch tweets from Twitter user timeline via RapidAPI
+      // Requires RAPIDAPI_KEY and TWITTER_USERNAME/TWITTER_USER_ID in env
+      tweets = await fetchLatestTweetsRapidAPI(twitterUsername, 10);
+    } else {
+      console.log(
+        `[poll-and-post] Fetching tweets from Twitter List ID: ${listId}`
+      );
+      // Fetch tweets from Twitter List Timeline via RapidAPI
+      // Requires RAPIDAPI_KEY and LIST_ID in env
+      tweets = await fetchLatestTweetsFromListRapidAPI(listId, 10);
+    }
+    console.log("[poll-and-post] Fetched tweets (RapidAPI):", tweets);
     if (!tweets.length) {
       console.warn(
-        `[poll-and-post] No tweets found for list ID ${listId} (RapidAPI)`
+        `[poll-and-post] No tweets found (RapidAPI)`
       );
       return NextResponse.json({ ok: true, message: "No tweets found." });
     }
@@ -112,14 +123,14 @@ export async function POST(req: NextRequest) {
     const toPost = newTweets.slice(0, 3);
     for (const tweet of toPost) {
       // Pass altText for images to Bluesky
-      await postToBluesky(tweet.text, tweet.images, undefined, tweet.altText);
+      await postToBluesky(tweet.text, tweet.images, tweet.videos, tweet.altText);
       console.log(`[poll-and-post] Posted tweet ${tweet.id} to Bluesky.`);
     }
-    await setLastTweetId(toPost[0].id); // The most recent tweet posted
+    await setLastTweetId(toPost[toPost.length - 1].id); // The most recent tweet posted
     return NextResponse.json({
       ok: true,
-      message: `Posted ${newTweets.length} new tweet(s) to Bluesky.`,
-      tweets: newTweets,
+      message: `Posted ${toPost.length} new tweet(s) to Bluesky.`,
+      tweets: toPost,
     });
   } catch (err) {
     console.error(`[poll-and-post] Error:`, err);

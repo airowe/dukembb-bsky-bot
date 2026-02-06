@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { htmlDecode } from './htmlDecode';
 
 const RAPIDAPI_KEY = process.env.RAPIDAPI_KEY;
 const RAPIDAPI_HOST = 'twitter-api45.p.rapidapi.com';
@@ -9,7 +10,25 @@ export interface RapidApiTweet {
   url: string;
   timestamp: string;
   images: string[];
+  videos?: string[];
   altText: string[];
+}
+
+interface UrlEntity {
+  url: string;
+  expanded_url: string;
+}
+
+function expandUrls(text: string, urls?: UrlEntity[]): string {
+  if (!urls || !Array.isArray(urls)) return text;
+  let updated = text;
+  for (const u of urls) {
+    if (u.url && u.expanded_url) {
+      const regex = new RegExp(u.url.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g');
+      updated = updated.replace(regex, u.expanded_url);
+    }
+  }
+  return updated;
 }
 
 export async function fetchLatestTweetsRapidAPI(username: string, count = 1): Promise<RapidApiTweet[]> {
@@ -21,34 +40,67 @@ export async function fetchLatestTweetsRapidAPI(username: string, count = 1): Pr
       'X-RapidAPI-Host': RAPIDAPI_HOST,
     },
   });
-  // Adapt the response to match your Tweet interface
-  return response.data.result.map((tweet: {
-    id_str: string;
-    full_text: string;
-    created_at: string;
-    entities?: {
-      media?: { media_url_https: string }[];
-      urls?: { url: string; expanded_url: string }[];
-    };
-  }) => {
-    let text = tweet.full_text;
-    if (tweet.entities?.urls && Array.isArray(tweet.entities.urls)) {
-      for (const u of tweet.entities.urls) {
-        if (u.url && u.expanded_url) {
-          // Replace all instances of the t.co link with the expanded URL
-          const regex = new RegExp(u.url.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g');
-          text = text.replace(regex, u.expanded_url);
+  const raw = Array.isArray(response.data?.result) ? response.data.result : [];
+  return raw
+    .filter((tweet: {
+      full_text?: string;
+      text?: string;
+      retweeted_status?: unknown;
+      in_reply_to_status_id?: string | null;
+      in_reply_to_status_id_str?: string | null;
+      is_reply?: boolean;
+    }) => {
+      const t = tweet.full_text ?? tweet.text ?? '';
+      if (t.startsWith('RT ')) return false;
+      if (tweet.retweeted_status) return false;
+      if (tweet.in_reply_to_status_id || tweet.in_reply_to_status_id_str) return false;
+      if (tweet.is_reply) return false;
+      return true;
+    })
+    .map((tweet: {
+      id_str: string;
+      full_text?: string;
+      text?: string;
+      created_at: string;
+      entities?: {
+        media?: { media_url_https: string; type?: string; video_info?: { variants?: VideoVariant[] }; ext_alt_text?: string | null }[];
+        urls?: UrlEntity[];
+      };
+      extended_entities?: {
+        media?: { media_url_https: string; type?: string; video_info?: { variants?: VideoVariant[] }; ext_alt_text?: string | null }[];
+      };
+    }) => {
+      let text = htmlDecode(tweet.full_text ?? tweet.text ?? '');
+      text = expandUrls(text, tweet.entities?.urls);
+
+      const media = tweet.extended_entities?.media || tweet.entities?.media || [];
+      const images: string[] = [];
+      const videos: string[] = [];
+      const altText: string[] = [];
+
+      for (const m of media) {
+        if (m.type === 'photo' && m.media_url_https) {
+          images.push(m.media_url_https);
+          altText.push(m.ext_alt_text ?? `Image from tweet by @${username}`);
+          continue;
+        }
+        if ((m.type === 'video' || m.type === 'animated_gif') && m.video_info?.variants) {
+          const mp4s = m.video_info.variants.filter((v) => v.content_type === 'video/mp4');
+          const best = mp4s.sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0))[0]?.url;
+          if (best) videos.push(best);
         }
       }
-    }
-    return {
-      id: tweet.id_str,
-      text,
-      url: `https://x.com/${username}/status/${tweet.id_str}`,
-      timestamp: tweet.created_at,
-      images: tweet.entities?.media?.map((m) => m.media_url_https) || [],
-    };
-  });
+
+      return {
+        id: tweet.id_str,
+        text,
+        url: `https://x.com/${username}/status/${tweet.id_str}`,
+        timestamp: tweet.created_at,
+        images,
+        videos,
+        altText,
+      };
+    });
 }
 
 /**
@@ -72,8 +124,6 @@ interface Media {
   video?: VideoMedia[];
 }
 
-
-import { htmlDecode } from './htmlDecode';
 
 export async function fetchLatestTweetsFromListRapidAPI(listId: string, count = 3): Promise<RapidApiTweet[]> {
   const url = `https://${RAPIDAPI_HOST}/listtimeline.php`;
@@ -147,7 +197,8 @@ export async function fetchLatestTweetsFromListRapidAPI(listId: string, count = 
         text,
         url: tweet.screen_name ? `https://x.com/${tweet.screen_name}/status/${tweet.tweet_id}` : '',
         timestamp: tweet.created_at,
-        images: [...images, ...videos],
+        images,
+        videos,
         altText,
       };
     });

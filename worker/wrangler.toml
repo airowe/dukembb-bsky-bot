@@ -1,0 +1,21 @@
+name = "dukembb-bsky-poller"
+main = "src/worker.ts"
+compatibility_date = "2026-02-06"
+
+[triggers]
+crons = ["*/5 * * * *"]
+
+[vars]
+TWITTER_USERNAME = "dukembb"
+BSKY_USERNAME = "adaminsley+dukembbbot@gmail.com"
+SCHEDULE_URL = "https://goduke.com/sports/mens-basketball/schedule/text"
+TIMEZONE = "America/New_York"
+BASELINE_MINUTES = "60"
+GAME_MINUTES = "5"
+GAME_WINDOW_BEFORE_MINUTES = "90"
+GAME_WINDOW_AFTER_MINUTES = "210"
+SCHEDULE_CACHE_TTL_MINUTES = "360"
+
+[[kv_namespaces]]
+binding = "DUKE_KV"
+id = "480255d1d3ce4699bfc6ae4bb90ec468"
