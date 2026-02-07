@@ -33,3 +33,5 @@ Optional tuning (vars in `worker/wrangler.toml`)
 
 Manual trigger
 - `curl https://<worker-domain>/run` for a one-off run
+- Dry run (no posting, saves planned posts in KV key `dry-run-last`):
+  - `curl https://<worker-domain>/dry-run`
