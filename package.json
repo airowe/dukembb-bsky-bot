@@ -3,32 +3,14 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev --turbopack",
-    "build": "next build",
-    "start": "next start",
-    "lint": "next lint",
     "test": "vitest run",
-    "test:worker": "vitest run worker/tests"
+    "test:worker": "vitest run worker/tests",
+    "deploy:worker": "wrangler deploy --config worker/wrangler.toml"
   },
-  "dependencies": {
-    "@atproto/api": "^0.15.19",
-    "axios": "^1.10.0",
-    "cheerio": "^1.1.0",
-    "he": "^1.2.0",
-    "html-entities": "^2.6.0",
-    "next": "15.3.8",
-    "puppeteer": "^24.11.1",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0"
-  },
+  "dependencies": {},
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20250229.0",
-    "@eslint/eslintrc": "^3",
     "@types/node": "^20",
-    "@types/react": "^19",
-    "@types/react-dom": "^19",
-    "eslint": "^9",
-    "eslint-config-next": "15.3.4",
     "typescript": "^5",
     "vitest": "^2.1.8",
     "wrangler": "^3.112.0"
