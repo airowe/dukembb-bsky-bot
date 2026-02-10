@@ -25,6 +25,13 @@ interface ScheduleCache {
   games: number[]; // UTC ms
 }
 
+interface QuotedTweet {
+  url: string;
+  author: string;
+  text: string;
+  photoUrl: string | null;
+}
+
 interface RapidApiTweet {
   id: string;
   text: string;
@@ -33,6 +40,8 @@ interface RapidApiTweet {
   images: string[];
   videos: string[];
   altText: string[];
+  videoAspectRatio: { width: number; height: number } | null;
+  quotedTweet: QuotedTweet | null;
 }
 
 interface AtProtoSession {
@@ -52,6 +61,9 @@ const DEFAULT_SCHEDULE_CACHE_TTL_MINUTES = 360;
 const MAX_POSTS_PER_RUN = 3;
 const MAX_IMAGES = 4;
 const MAX_IMAGE_BYTES = 1_000_000;
+const MAX_VIDEO_BYTES = 100_000_000;
+const VIDEO_POLL_INTERVAL_MS = 1_500;
+const VIDEO_POLL_TIMEOUT_MS = 60_000;
 
 export default {
   async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext) {
@@ -132,14 +144,41 @@ async function pollAndPost(env: Env, opts: { dryRun: boolean; now: number; mode:
   const tweetsChrono = [...tweets].reverse();
   let newTweets: RapidApiTweet[] = tweetsChrono;
 
-  if (lastTweetId) {
-    const idx = tweetsChrono.findIndex((t) => t.id === lastTweetId);
-    if (idx === -1) {
-      console.log('[worker] Last tweet not found in latest fetch; skipping to avoid duplicates');
-      return true;
-    }
-    newTweets = tweetsChrono.slice(idx + 1);
+  if (!lastTweetId) {
+    // First run: seed with the latest tweet ID without posting anything
+    const latest = tweetsChrono[tweetsChrono.length - 1];
+    console.log('[worker] No lastTweetId found; seeding with', latest.id);
+    await setLastTweetId(env, latest.id);
+    return true;
   }
+
+  const idx = tweetsChrono.findIndex((t) => t.id === lastTweetId);
+  if (idx === -1) {
+    console.log('[worker] Last tweet not found in latest fetch; skipping to avoid duplicates');
+    if (opts.dryRun) {
+      await env.DUKE_KV.put(
+        'dry-run-last',
+        JSON.stringify({
+          at: opts.now,
+          mode: opts.mode,
+          reason: 'lastTweetId-not-in-timeline',
+          lastTweetId,
+          allIds: tweetsChrono.map((t) => t.id),
+          tweets: tweetsChrono.map((t) => ({
+            id: t.id,
+            text: t.text,
+            url: t.url,
+            images: t.images,
+            videos: t.videos,
+            videoAspectRatio: t.videoAspectRatio,
+            quotedTweet: t.quotedTweet,
+          })),
+        })
+      );
+    }
+    return true;
+  }
+  newTweets = tweetsChrono.slice(idx + 1);
 
   if (!newTweets.length) {
     if (opts.dryRun) {
@@ -164,13 +203,15 @@ async function pollAndPost(env: Env, opts: { dryRun: boolean; now: number; mode:
           url: t.url,
           images: t.images,
           videos: t.videos,
+          videoAspectRatio: t.videoAspectRatio,
+          quotedTweet: t.quotedTweet,
         })),
       })
     );
     return true;
   }
   for (const tweet of toPost) {
-    const ok = await postToBluesky(env, tweet.text, tweet.images, tweet.videos, tweet.altText);
+    const ok = await postToBluesky(env, tweet);
     if (!ok) return false;
   }
 
@@ -215,8 +256,20 @@ async function fetchLatestTweetsRapidAPI(username: string, apiKey: string, count
       };
       media?: {
         photo?: { media_url_https: string }[];
-        video?: { variants?: { content_type: string; url: string; bitrate?: number }[] }[];
+        video?: {
+          variants?: { content_type: string; url: string; bitrate?: number }[];
+          media_url_https?: string;
+          original_info?: { width?: number; height?: number };
+        }[];
       } | unknown[];
+      quoted?: {
+        tweet_id: string;
+        text?: string;
+        author?: { screen_name?: string };
+        media?: {
+          photo?: { media_url_https: string }[];
+        } | unknown[];
+      };
     }) => {
       let text = htmlDecode(tweet.text ?? '');
       text = expandUrls(text, tweet.entities?.urls);
@@ -224,6 +277,7 @@ async function fetchLatestTweetsRapidAPI(username: string, apiKey: string, count
       const images: string[] = [];
       const videos: string[] = [];
       const altText: string[] = [];
+      let videoAspectRatio: { width: number; height: number } | null = null;
 
       const media = tweet.media && !Array.isArray(tweet.media) ? tweet.media : null;
       // Strip trailing t.co media URLs from text when media is attached
@@ -246,8 +300,28 @@ async function fetchLatestTweetsRapidAPI(username: string, apiKey: string, count
               const best = mp4s.sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0))[0]?.url;
               if (best) videos.push(best);
             }
+            if (v.original_info?.width && v.original_info?.height) {
+              videoAspectRatio = { width: v.original_info.width, height: v.original_info.height };
+            }
           }
         }
+      }
+
+      // Handle quoted tweets
+      let quotedTweet: QuotedTweet | null = null;
+      if (tweet.quoted) {
+        const qAuthor = tweet.quoted.author?.screen_name ?? '';
+        const qText = htmlDecode(tweet.quoted.text ?? '');
+        const qMedia = tweet.quoted.media && !Array.isArray(tweet.quoted.media) ? tweet.quoted.media : null;
+        const qPhoto = qMedia?.photo?.[0]?.media_url_https ?? null;
+        quotedTweet = {
+          url: `https://x.com/${qAuthor}/status/${tweet.quoted.tweet_id}`,
+          author: qAuthor,
+          text: qText,
+          photoUrl: qPhoto,
+        };
+        // Strip the quoted tweet t.co URL from the end of text
+        text = text.replace(/\s*https:\/\/t\.co\/\S+\s*$/, '').trim();
       }
 
       return {
@@ -258,11 +332,82 @@ async function fetchLatestTweetsRapidAPI(username: string, apiKey: string, count
         images,
         videos,
         altText,
+        videoAspectRatio,
+        quotedTweet,
       };
     });
 }
 
-async function postToBluesky(env: Env, text: string, images: string[], videos: string[], altText: string[]): Promise<boolean> {
+async function uploadVideo(
+  session: AtProtoSession,
+  videoUrl: string
+): Promise<{ blob: unknown } | null> {
+  try {
+    // Download the video from Twitter
+    const dlRes = await fetch(videoUrl);
+    if (!dlRes.ok) {
+      console.log('[worker] video download failed', dlRes.status);
+      return null;
+    }
+    const videoBytes = await dlRes.arrayBuffer();
+    if (videoBytes.byteLength > MAX_VIDEO_BYTES) {
+      console.log('[worker] video too large', videoBytes.byteLength);
+      return null;
+    }
+
+    // Upload to Bluesky video service
+    const uploadUrl = `https://video.bsky.app/xrpc/app.bsky.video.uploadVideo?did=${encodeURIComponent(session.did)}&name=video.mp4`;
+    const uploadRes = await fetch(uploadUrl, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${session.accessJwt}`,
+        'content-type': 'video/mp4',
+      },
+      body: videoBytes,
+    });
+    if (!uploadRes.ok) {
+      console.log('[worker] video upload failed', uploadRes.status, await uploadRes.text());
+      return null;
+    }
+    const uploadData = await uploadRes.json();
+    const jobId = uploadData?.jobId;
+    if (!jobId) {
+      console.log('[worker] no jobId in video upload response');
+      return null;
+    }
+
+    // Poll for completion
+    const deadline = Date.now() + VIDEO_POLL_TIMEOUT_MS;
+    while (Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, VIDEO_POLL_INTERVAL_MS));
+      const statusRes = await fetch(
+        `https://video.bsky.app/xrpc/app.bsky.video.getJobStatus?jobId=${encodeURIComponent(jobId)}`,
+        { headers: { authorization: `Bearer ${session.accessJwt}` } }
+      );
+      if (!statusRes.ok) continue;
+      const statusData = await statusRes.json();
+      const state = statusData?.jobStatus?.state;
+      if (state === 'JOB_STATE_COMPLETED') {
+        const blob = statusData?.jobStatus?.blob;
+        if (blob) return { blob };
+        console.log('[worker] video job completed but no blob');
+        return null;
+      }
+      if (state === 'JOB_STATE_FAILED') {
+        console.log('[worker] video processing failed', statusData?.jobStatus?.error);
+        return null;
+      }
+    }
+    console.log('[worker] video processing timed out');
+    return null;
+  } catch (err) {
+    console.log('[worker] uploadVideo error', (err as Error).message);
+    return null;
+  }
+}
+
+async function postToBluesky(env: Env, tweet: RapidApiTweet): Promise<boolean> {
+  const { text, images, videos, altText, videoAspectRatio, quotedTweet, url: tweetUrl } = tweet;
   const safeText = escapeBlueskyText(text);
   const facets = buildFacets(safeText);
 
@@ -272,14 +417,28 @@ async function postToBluesky(env: Env, text: string, images: string[], videos: s
   let embed: unknown = undefined;
 
   if (videos.length > 0) {
-    embed = {
-      $type: 'app.bsky.embed.external',
-      external: {
-        uri: videos[0],
-        title: 'Video',
-        description: '',
-      },
-    };
+    // Try native video upload
+    const videoResult = await uploadVideo(session, videos[0]);
+    if (videoResult) {
+      const videoEmbed: Record<string, unknown> = {
+        $type: 'app.bsky.embed.video',
+        video: videoResult.blob,
+      };
+      if (videoAspectRatio) {
+        videoEmbed.aspectRatio = videoAspectRatio;
+      }
+      embed = videoEmbed;
+    } else {
+      // Fallback: link card to the original tweet (not raw MP4)
+      embed = {
+        $type: 'app.bsky.embed.external',
+        external: {
+          uri: tweetUrl,
+          title: 'Video',
+          description: 'Watch on X',
+        },
+      };
+    }
   } else if (images.length > 0) {
     const uploaded = await uploadImages(env, session.accessJwt, images, altText);
     if (uploaded.length > 0) {
@@ -288,6 +447,49 @@ async function postToBluesky(env: Env, text: string, images: string[], videos: s
         images: uploaded,
       };
     }
+  }
+
+  // Quote tweet embed card (only when no other embed is present)
+  if (!embed && quotedTweet) {
+    const external: Record<string, unknown> = {
+      uri: quotedTweet.url,
+      title: `@${quotedTweet.author}`,
+      description: quotedTweet.text.length > 300
+        ? quotedTweet.text.slice(0, 297) + '...'
+        : quotedTweet.text,
+    };
+    // Try to upload the quoted tweet's photo as a thumbnail
+    if (quotedTweet.photoUrl) {
+      try {
+        const thumbRes = await fetch(quotedTweet.photoUrl);
+        if (thumbRes.ok) {
+          const ct = thumbRes.headers.get('content-type') || '';
+          if (ct.startsWith('image/')) {
+            const buf = await thumbRes.arrayBuffer();
+            if (buf.byteLength <= MAX_IMAGE_BYTES) {
+              const uploadRes = await fetch('https://bsky.social/xrpc/com.atproto.repo.uploadBlob', {
+                method: 'POST',
+                headers: {
+                  authorization: `Bearer ${session.accessJwt}`,
+                  'content-type': ct,
+                },
+                body: buf,
+              });
+              if (uploadRes.ok) {
+                const uploadData = await uploadRes.json();
+                if (uploadData?.blob) external.thumb = uploadData.blob;
+              }
+            }
+          }
+        }
+      } catch (err) {
+        console.log('[worker] quote thumb upload error', (err as Error).message);
+      }
+    }
+    embed = {
+      $type: 'app.bsky.embed.external',
+      external,
+    };
   }
 
   const record: Record<string, unknown> = {
