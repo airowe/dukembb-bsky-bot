@@ -61,7 +61,8 @@ export default {
     const url = new URL(request.url);
     if (url.pathname === '/run' || url.pathname === '/dry-run') {
       const dryRun = url.pathname === '/dry-run' || url.searchParams.get('dry') === '1';
-      const result = await run(env, dryRun);
+      const force = url.searchParams.get('force') === '1';
+      const result = await run(env, dryRun, force);
       return new Response(JSON.stringify(result), {
         status: 200,
         headers: { 'content-type': 'application/json' },
@@ -78,7 +79,7 @@ export default {
   },
 };
 
-async function run(env: Env, dryRun: boolean) {
+async function run(env: Env, dryRun: boolean, force = false) {
   const now = Date.now();
   const baselineMinutes = getInt(env.BASELINE_MINUTES, DEFAULT_BASELINE_MINUTES);
   const gameMinutes = getInt(env.GAME_MINUTES, DEFAULT_GAME_MINUTES);
@@ -96,14 +97,14 @@ async function run(env: Env, dryRun: boolean) {
   const intervalMinutes = inGameWindow ? gameMinutes : baselineMinutes;
 
   const state = await getPollState(env);
-  const shouldPoll = dryRun || mode !== state.lastMode || now - (state.lastPollAt ?? 0) >= intervalMinutes * 60_000;
+  const shouldPoll = force || dryRun || mode !== state.lastMode || now - (state.lastPollAt ?? 0) >= intervalMinutes * 60_000;
 
   if (!shouldPoll) {
     return { ok: true, skipped: true, mode, reason: 'interval-not-reached' };
   }
 
   const ok = await pollAndPost(env, { dryRun, now, mode });
-  if (ok) {
+  if (ok && !dryRun) {
     await setPollState(env, { lastPollAt: now, lastMode: mode });
   }
 
@@ -178,7 +179,7 @@ async function pollAndPost(env: Env, opts: { dryRun: boolean; now: number; mode:
 }
 
 async function fetchLatestTweetsRapidAPI(username: string, apiKey: string, count = 10): Promise<RapidApiTweet[]> {
-  const url = `https://${RAPIDAPI_HOST}/user/tweets/${username}?limit=${count}`;
+  const url = `https://${RAPIDAPI_HOST}/timeline.php?screenname=${username}`;
   const response = await fetch(url, {
     headers: {
       'X-RapidAPI-Key': apiKey,
@@ -190,62 +191,69 @@ async function fetchLatestTweetsRapidAPI(username: string, apiKey: string, count
     return [];
   }
   const data = await response.json();
-  const raw = Array.isArray(data?.result) ? data.result : [];
+  const raw = Array.isArray(data?.timeline) ? data.timeline : [];
 
   return raw
     .filter((tweet: {
-      full_text?: string;
       text?: string;
-      retweeted_status?: unknown;
-      in_reply_to_status_id?: string | null;
-      in_reply_to_status_id_str?: string | null;
-      is_reply?: boolean;
+      retweeted_tweet?: unknown;
+      tweet_id?: string;
+      conversation_id?: string;
     }) => {
-      const t = tweet.full_text ?? tweet.text ?? '';
+      const t = tweet.text ?? '';
       if (t.startsWith('RT ')) return false;
-      if (tweet.retweeted_status) return false;
-      if (tweet.in_reply_to_status_id || tweet.in_reply_to_status_id_str) return false;
-      if (tweet.is_reply) return false;
+      if (tweet.retweeted_tweet) return false;
+      if (tweet.conversation_id && tweet.tweet_id && tweet.conversation_id !== tweet.tweet_id) return false;
       return true;
     })
     .map((tweet: {
-      id_str: string;
-      full_text?: string;
+      tweet_id: string;
       text?: string;
       created_at: string;
       entities?: {
-        media?: { media_url_https: string; type?: string; video_info?: { variants?: { content_type: string; url: string; bitrate?: number }[] }; ext_alt_text?: string | null }[];
         urls?: { url: string; expanded_url: string }[];
       };
-      extended_entities?: {
-        media?: { media_url_https: string; type?: string; video_info?: { variants?: { content_type: string; url: string; bitrate?: number }[] }; ext_alt_text?: string | null }[];
-      };
+      media?: {
+        photo?: { media_url_https: string }[];
+        video?: { variants?: { content_type: string; url: string; bitrate?: number }[] }[];
+      } | unknown[];
     }) => {
-      let text = htmlDecode(tweet.full_text ?? tweet.text ?? '');
+      let text = htmlDecode(tweet.text ?? '');
       text = expandUrls(text, tweet.entities?.urls);
 
-      const media = tweet.extended_entities?.media || tweet.entities?.media || [];
       const images: string[] = [];
       const videos: string[] = [];
       const altText: string[] = [];
 
-      for (const m of media) {
-        if (m.type === 'photo' && m.media_url_https) {
-          images.push(m.media_url_https);
-          altText.push(m.ext_alt_text ?? `Image from tweet by @${username}`);
-          continue;
+      const media = tweet.media && !Array.isArray(tweet.media) ? tweet.media : null;
+      // Strip trailing t.co media URLs from text when media is attached
+      if (media && (media.photo?.length || media.video?.length)) {
+        text = text.replace(/\s*https:\/\/t\.co\/\S+\s*$/, '').trim();
+      }
+      if (media) {
+        if (media.photo) {
+          for (const p of media.photo) {
+            if (p.media_url_https) {
+              images.push(p.media_url_https);
+              altText.push(`Image from tweet by @${username}`);
+            }
+          }
         }
-        if ((m.type === 'video' || m.type === 'animated_gif') && m.video_info?.variants) {
-          const mp4s = m.video_info.variants.filter((v) => v.content_type === 'video/mp4');
-          const best = mp4s.sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0))[0]?.url;
-          if (best) videos.push(best);
+        if (media.video) {
+          for (const v of media.video) {
+            if (v.variants) {
+              const mp4s = v.variants.filter((vr) => vr.content_type === 'video/mp4');
+              const best = mp4s.sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0))[0]?.url;
+              if (best) videos.push(best);
+            }
+          }
         }
       }
 
       return {
-        id: tweet.id_str,
+        id: tweet.tweet_id,
         text,
-        url: `https://x.com/${username}/status/${tweet.id_str}`,
+        url: `https://x.com/${username}/status/${tweet.tweet_id}`,
         timestamp: tweet.created_at,
         images,
         videos,
