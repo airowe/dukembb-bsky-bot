@@ -154,7 +154,9 @@ async function pollAndPost(env: Env, opts: { dryRun: boolean; now: number; mode:
 
   const idx = tweetsChrono.findIndex((t) => t.id === lastTweetId);
   if (idx === -1) {
-    console.log('[worker] Last tweet not found in latest fetch; skipping to avoid duplicates');
+    console.log('[worker] Last tweet not found in latest fetch; resetting to newest and posting latest batch');
+    const latest = tweetsChrono[tweetsChrono.length - 1];
+    const toPost = tweetsChrono.slice(-MAX_POSTS_PER_RUN);
     if (opts.dryRun) {
       await env.DUKE_KV.put(
         'dry-run-last',
@@ -163,19 +165,23 @@ async function pollAndPost(env: Env, opts: { dryRun: boolean; now: number; mode:
           mode: opts.mode,
           reason: 'lastTweetId-not-in-timeline',
           lastTweetId,
-          allIds: tweetsChrono.map((t) => t.id),
-          tweets: tweetsChrono.map((t) => ({
+          resetTo: latest.id,
+          planned: toPost.map((t) => ({
             id: t.id,
             text: t.text,
             url: t.url,
             images: t.images,
             videos: t.videos,
-            videoAspectRatio: t.videoAspectRatio,
-            quotedTweet: t.quotedTweet,
           })),
         })
       );
+      return true;
     }
+    for (const tweet of toPost) {
+      const ok = await postToBluesky(env, tweet.text, tweet.images, tweet.videos, tweet.altText);
+      if (!ok) return false;
+    }
+    await setLastTweetId(env, latest.id);
     return true;
   }
   newTweets = tweetsChrono.slice(idx + 1);
