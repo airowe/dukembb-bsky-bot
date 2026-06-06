@@ -44,6 +44,37 @@ interface RapidApiTweet {
   quotedTweet: QuotedTweet | null;
 }
 
+interface RawTweet {
+  tweet_id: string;
+  text?: string;
+  created_at: string;
+  retweeted_tweet?: unknown;
+  conversation_id?: string;
+  entities?: {
+    urls?: { url: string; expanded_url: string }[];
+  };
+  media?:
+    | {
+        photo?: { media_url_https: string }[];
+        video?: {
+          variants?: { content_type: string; url: string; bitrate?: number }[];
+          media_url_https?: string;
+          original_info?: { width?: number; height?: number };
+        }[];
+      }
+    | unknown[];
+  quoted?: {
+    tweet_id: string;
+    text?: string;
+    author?: { screen_name?: string };
+    media?:
+      | {
+          photo?: { media_url_https: string }[];
+        }
+      | unknown[];
+  };
+}
+
 interface AtProtoSession {
   accessJwt: string;
   did: string;
@@ -53,7 +84,7 @@ interface AtProtoSession {
 const RAPIDAPI_HOST = 'twitter-api45.p.rapidapi.com';
 const DEFAULT_SCHEDULE_URL = 'https://goduke.com/sports/mens-basketball/schedule/text';
 const DEFAULT_TIMEZONE = 'America/New_York';
-const DEFAULT_BASELINE_MINUTES = 60;
+const DEFAULT_BASELINE_MINUTES = 180;
 const DEFAULT_GAME_MINUTES = 5;
 const DEFAULT_GAME_WINDOW_BEFORE_MINUTES = 90;
 const DEFAULT_GAME_WINDOW_AFTER_MINUTES = 210;
@@ -178,7 +209,7 @@ async function pollAndPost(env: Env, opts: { dryRun: boolean; now: number; mode:
       return true;
     }
     for (const tweet of toPost) {
-      const ok = await postToBluesky(env, tweet.text, tweet.images, tweet.videos, tweet.altText);
+      const ok = await postToBluesky(env, tweet);
       if (!ok) return false;
     }
     await setLastTweetId(env, latest.id);
@@ -237,46 +268,18 @@ async function fetchLatestTweetsRapidAPI(username: string, apiKey: string, count
     console.log('[worker] RapidAPI error', response.status);
     return [];
   }
-  const data = await response.json();
-  const raw = Array.isArray(data?.timeline) ? data.timeline : [];
+  const data = (await response.json()) as { timeline?: RawTweet[] };
+  const raw: RawTweet[] = Array.isArray(data?.timeline) ? data.timeline : [];
 
   return raw
-    .filter((tweet: {
-      text?: string;
-      retweeted_tweet?: unknown;
-      tweet_id?: string;
-      conversation_id?: string;
-    }) => {
+    .filter((tweet) => {
       const t = tweet.text ?? '';
       if (t.startsWith('RT ')) return false;
       if (tweet.retweeted_tweet) return false;
       if (tweet.conversation_id && tweet.tweet_id && tweet.conversation_id !== tweet.tweet_id) return false;
       return true;
     })
-    .map((tweet: {
-      tweet_id: string;
-      text?: string;
-      created_at: string;
-      entities?: {
-        urls?: { url: string; expanded_url: string }[];
-      };
-      media?: {
-        photo?: { media_url_https: string }[];
-        video?: {
-          variants?: { content_type: string; url: string; bitrate?: number }[];
-          media_url_https?: string;
-          original_info?: { width?: number; height?: number };
-        }[];
-      } | unknown[];
-      quoted?: {
-        tweet_id: string;
-        text?: string;
-        author?: { screen_name?: string };
-        media?: {
-          photo?: { media_url_https: string }[];
-        } | unknown[];
-      };
-    }) => {
+    .map((tweet) => {
       let text = htmlDecode(tweet.text ?? '');
       text = expandUrls(text, tweet.entities?.urls);
 
@@ -375,7 +378,7 @@ async function uploadVideo(
       console.log('[worker] video upload failed', uploadRes.status, await uploadRes.text());
       return null;
     }
-    const uploadData = await uploadRes.json();
+    const uploadData = (await uploadRes.json()) as { jobId?: string };
     const jobId = uploadData?.jobId;
     if (!jobId) {
       console.log('[worker] no jobId in video upload response');
@@ -391,7 +394,9 @@ async function uploadVideo(
         { headers: { authorization: `Bearer ${session.accessJwt}` } }
       );
       if (!statusRes.ok) continue;
-      const statusData = await statusRes.json();
+      const statusData = (await statusRes.json()) as {
+        jobStatus?: { state?: string; blob?: unknown; error?: string };
+      };
       const state = statusData?.jobStatus?.state;
       if (state === 'JOB_STATE_COMPLETED') {
         const blob = statusData?.jobStatus?.blob;
@@ -482,7 +487,7 @@ async function postToBluesky(env: Env, tweet: RapidApiTweet): Promise<boolean> {
                 body: buf,
               });
               if (uploadRes.ok) {
-                const uploadData = await uploadRes.json();
+                const uploadData = (await uploadRes.json()) as { blob?: unknown };
                 if (uploadData?.blob) external.thumb = uploadData.blob;
               }
             }
@@ -557,7 +562,9 @@ async function uploadImages(env: Env, accessJwt: string, images: string[], altTe
         body: arrayBuffer,
       });
       if (!upload.ok) continue;
-      const data = await upload.json();
+      const data = (await upload.json()) as {
+        blob?: { $type: 'blob'; ref: { $link: string }; mimeType: string; size: number };
+      };
       if (!data?.blob) continue;
 
       out.push({
@@ -590,7 +597,7 @@ async function getSession(env: Env): Promise<AtProtoSession | null> {
     console.log('[worker] createSession failed', res.status);
     return null;
   }
-  const data = await res.json();
+  const data = (await res.json()) as { accessJwt?: string; did?: string };
   if (!data?.accessJwt || !data?.did) return null;
   const session: AtProtoSession = {
     accessJwt: data.accessJwt,
