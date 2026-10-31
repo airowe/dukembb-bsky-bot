@@ -208,12 +208,9 @@ async function pollAndPost(env: Env, opts: { dryRun: boolean; now: number; mode:
       );
       return true;
     }
-    for (const tweet of toPost) {
-      const ok = await postToBluesky(env, tweet);
-      if (!ok) return false;
-    }
-    await setLastTweetId(env, latest.id);
-    return true;
+    const okAll = await postAndAdvance(env, toPost);
+    if (okAll) await setLastTweetId(env, latest.id);
+    return okAll;
   }
   newTweets = tweetsChrono.slice(idx + 1);
 
@@ -247,13 +244,41 @@ async function pollAndPost(env: Env, opts: { dryRun: boolean; now: number; mode:
     );
     return true;
   }
-  for (const tweet of toPost) {
-    const ok = await postToBluesky(env, tweet);
-    if (!ok) return false;
-  }
+  return postAndAdvance(env, toPost);
+}
 
-  await setLastTweetId(env, toPost[toPost.length - 1].id);
+const MAX_POST_FAILURES = 3;
+
+// Posts in order and persists lastTweetId after EACH success, so a later failure
+// can never cause earlier tweets to be re-posted. A tweet that keeps failing is
+// skipped after MAX_POST_FAILURES attempts so it can't block the queue forever.
+async function postAndAdvance(env: Env, tweets: RapidApiTweet[]): Promise<boolean> {
+  for (const tweet of tweets) {
+    const ok = await postToBluesky(env, tweet);
+    if (ok) {
+      await env.DUKE_KV.delete(`fail:${tweet.id}`);
+      await setLastTweetId(env, tweet.id);
+      continue;
+    }
+    const failKey = `fail:${tweet.id}`;
+    const fails = parseInt((await env.DUKE_KV.get(failKey)) || '0', 10) + 1;
+    if (fails >= MAX_POST_FAILURES) {
+      console.log('[worker] giving up on tweet', tweet.id, 'after', fails, 'failures');
+      await env.DUKE_KV.delete(failKey);
+      await setLastTweetId(env, tweet.id);
+      continue;
+    }
+    await env.DUKE_KV.put(failKey, String(fails), { expirationTtl: 86_400 });
+    return false;
+  }
   return true;
+}
+
+function truncateGraphemes(text: string, max: number): string {
+  const seg = new Intl.Segmenter('en', { granularity: 'grapheme' });
+  const parts = [...seg.segment(text)];
+  if (parts.length <= max) return text;
+  return parts.slice(0, max - 1).map((p) => p.segment).join('').trimEnd() + '…';
 }
 
 async function fetchLatestTweetsRapidAPI(username: string, apiKey: string, count = 10): Promise<RapidApiTweet[]> {
@@ -419,7 +444,7 @@ async function uploadVideo(
 
 async function postToBluesky(env: Env, tweet: RapidApiTweet): Promise<boolean> {
   const { text, images, videos, altText, videoAspectRatio, quotedTweet, url: tweetUrl } = tweet;
-  const safeText = escapeBlueskyText(text);
+  const safeText = truncateGraphemes(escapeBlueskyText(text), 300);
   const facets = buildFacets(safeText);
 
   const session = await getSession(env);
